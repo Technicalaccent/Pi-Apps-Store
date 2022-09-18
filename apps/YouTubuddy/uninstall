@@ -1,0 +1,3 @@
+#!/bin/bash
+rm -rf ~/youtubuddy ~/.local/share/applications/youtubuddy.desktop
+purge_packages || exit 1

@@ -1,0 +1,7 @@
+#!/bin/bash
+
+purge_packages || exit 1
+rm -rf ~/PiGro-Aid-
+
+rm -f ~/Desktop/pigro.desktop ~/.local/share/applications/pigro.desktop
+

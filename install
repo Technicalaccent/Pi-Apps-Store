@@ -1,0 +1,168 @@
+#!/bin/bash
+
+function error {
+  echo -e "\e[91m$1\e[39m"
+  exit 1
+}
+
+cd "$HOME"
+
+#ensure non-root
+if [[ "$(id -u)" == 0 ]]; then
+  error "Pi-Apps is not designed to be installed as root! Please try again as a regular user."
+fi
+
+#ensure debian
+command -v apt >/dev/null || error "apt: command not found. Most likely this system is not running Debian."
+
+#Ensure running arm processor
+if uname -m | grep -qi 'x86\|i686\|i386' ;then
+  error "Pi-Apps is not supported on non-ARM CPU architectures. You may be interested in Pi-Apps x86, a unofficial fork of Pi-Apps for x64 and x86 systems: https://github.com/Pi-Apps-Recreates/pi-apps-x86"
+fi
+
+sudo apt update || error "The command 'sudo apt update' failed. Before Pi-Apps will work, you must fix your apt package-management system."
+
+#install dependencies
+dependencies='yad curl wget aria2 lsb-release apt-utils imagemagick bc librsvg2-bin locales shellcheck git wmctrl xdotool x11-utils rsync'
+
+if ! dpkg -s $dependencies &>/dev/null ;then
+  sudo apt install $dependencies -y -f --no-install-recommends
+fi
+echo
+
+#remove annoying "YAD icon browser" launcher
+sudo rm -f /usr/share/applications/yad-icon-browser.desktop
+
+#download pi-apps if folder missing
+DIRECTORY="$(readlink -f "$(dirname "$0")")"
+if [ -z "$DIRECTORY" ] || [ "$DIRECTORY" == "$HOME" ] || [ "$DIRECTORY" == bash ];then
+  DIRECTORY="$HOME/pi-apps"
+fi
+downloaded=0 #track if pi-apps was downloaded this time
+
+#Re-download pi-apps folder if local git repo is over 1 months out of date
+if [ -d "$DIRECTORY" ];then
+  #first compare local git repo's last-commit-time with the current system time (Unix epoch time format)
+  current_git_date="$(cd "$DIRECTORY"; git show -s --format=%ct)"
+  current_local_date="$(date +%s)"
+  if [ -z "$current_git_date" ] || [ "$current_local_date" -gt $(($current_git_date + 30*60*60*24)) ];then
+    
+    #if local git repo's last-commit-time is 3 months older than current system time, now compare the local git repo's last-commit-time with the online repo's modification time to avoid false positives.
+    #This two-tiered approach prevents unnecessary GitHub API calls and speeds up script's execution for normal usage.
+    
+    command -v curl >/dev/null || sudo apt install -y curl
+    upstream_git_date="$(curl https://api.github.com/repos/Botspot/pi-apps/commits/master 2>&1 | grep '"date":' | tail -n 1 | sed 's/"date"://g' | xargs date +%s -d 2>/dev/null)"
+    
+    if [[ "$upstream_git_date" =~ ^[0-9]+$ ]] && ([ -z "$current_git_date" ] || [ "$upstream_git_date" -gt $(($current_git_date + 30*60*60*24)) ]);then
+      rm -rf ~/pi-apps-forced-update
+      
+      echo "Reinstalling Pi-Apps..."
+      downloaded=1
+      output="$(git clone --depth 1 https://github.com/Botspot/pi-apps ~/pi-apps-forced-update 2>&1)"
+      if [ $? != 0 ] || [ ! -d "$DIRECTORY" ];then
+        error "Pi-Apps download failed!\ngit clone output was: $output"
+      fi
+      cp -af "${DIRECTORY}/data" ~/pi-apps-forced-update
+      cp -af "${DIRECTORY}/apps" ~/pi-apps-forced-update
+      rm -rf "$DIRECTORY"
+      mv -f ~/pi-apps-forced-update "$DIRECTORY"
+    fi
+  fi
+  
+#if pi-apps folder does not exist, download it
+elif [ ! -d "$DIRECTORY" ];then
+  echo "Downloading Pi-Apps..."
+  downloaded=1
+  output="$(git clone --depth 1 https://github.com/Botspot/pi-apps "$DIRECTORY" 2>&1)"
+  if [ $? != 0 ] || [ ! -d "$DIRECTORY" ];then
+    error "Pi-Apps download failed!\ngit clone output was: $output"
+  fi
+fi
+
+#Past this point, DIRECTORY variable populated with valid pi-apps directory
+
+#if ChromeOS, install lxterminal
+if command -v garcon-terminal-handler >/dev/null ;then
+  echo "In order to install apps on ChromeOS, a working terminal emulator is required.
+Installing lxterminal in 10 seconds... (press Ctrl+C to cancel)"
+  sleep 10
+  sudo apt install -yf lxterminal || error "Failed to install lxterminal on ChromeOS!"
+fi
+
+#menu button
+if [ ! -f ~/.local/share/applications/pi-apps.desktop ];then
+  echo "Creating menu button..."
+fi
+mkdir -p ~/.local/share/applications
+echo "[Desktop Entry]
+Name=Pi Apps
+Comment=Raspberry Pi App Store for open source projects
+Exec=${DIRECTORY}/gui
+Icon=${DIRECTORY}/icons/logo.png
+Terminal=false
+Type=Application
+Categories=Utility;
+StartupNotify=true" > ~/.local/share/applications/pi-apps.desktop
+
+#copy menu button to Desktop
+cp -f ~/.local/share/applications/pi-apps.desktop ~/Desktop
+
+#settings menu button
+if [ ! -f ~/.local/share/applications/pi-apps-settings.desktop ];then
+  echo "Creating Settings menu button..."
+fi
+echo "[Desktop Entry]
+Name=Pi Apps Settings
+Comment=Configure Pi-Apps or create an App
+Exec=${DIRECTORY}/settings
+Icon=${DIRECTORY}/icons/settings.png
+Terminal=false
+Type=Application
+Categories=Settings;
+StartupNotify=true" > ~/.local/share/applications/pi-apps-settings.desktop
+
+if [ ! -f ~/.config/autostart/pi-apps-updater.desktop ];then
+  echo "Creating autostarted updater..."
+fi
+mkdir -p ~/.config/autostart
+echo "[Desktop Entry]
+Name=Pi Apps Updater
+Exec=${DIRECTORY}/updater onboot
+Icon=${DIRECTORY}/icons/logo.png
+Terminal=false
+Type=Application
+X-GNOME-Autostart-enabled=true
+Hidden=false
+NoDisplay=false" > ~/.config/autostart/pi-apps-updater.desktop
+
+mkdir -p "${DIRECTORY}/data/status" "${DIRECTORY}/data/update-status" \
+  "${DIRECTORY}/data/preload" "${DIRECTORY}/data/settings" \
+  "${DIRECTORY}/data/status" "${DIRECTORY}/data/update-status" \
+  "${DIRECTORY}/data/categories"
+
+#pi-apps terminal command
+if [ ! -f /usr/local/bin/pi-apps ] || ! cat /usr/local/bin/pi-apps | grep -q "${DIRECTORY}/gui" ;then
+  echo "#!/bin/bash
+${DIRECTORY}/gui"' "$@"' | sudo tee /usr/local/bin/pi-apps >/dev/null
+  sudo chmod +x /usr/local/bin/pi-apps
+fi
+
+#preload app list
+if [ ! -f "$DIRECTORY/data/preload/LIST-" ];then
+  echo "Preloading app list..."
+fi
+"${DIRECTORY}/preload" yad &>/dev/null
+
+#Run runonce entries
+"${DIRECTORY}/etc/runonce-entries" &>/dev/null
+
+#Determine message of the day. If announcements file missing or over a day old, download it.
+if [ ! -f "${DIRECTORY}/data/announcements" ] || [ ! -z "$(find "${DIRECTORY}/data/announcements" -mtime +1 -print)" ]; then
+  wget https://raw.githubusercontent.com/Botspot/pi-apps-announcements/main/message -qO "${DIRECTORY}/data/announcements"
+fi
+
+if [ $downloaded == 1 ];then
+  echo "Installation complete. Pi-Apps can be launched from the start menu or by running the command 'pi-apps'."
+else
+  echo -e "Please note that Pi-Apps has NOT been freshly downloaded, because $DIRECTORY already exists."
+fi

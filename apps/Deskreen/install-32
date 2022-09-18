@@ -1,0 +1,3 @@
+#!/bin/bash
+
+install_packages 'https://github.com/Pi-Apps-Coders/files/releases/download/large-files/deskreen_2.0.3_armv7l.deb' || exit 1

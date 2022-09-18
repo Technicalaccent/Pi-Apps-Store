@@ -1,0 +1,7 @@
+#!/bin/bash
+
+purge_packages || exit 1
+sudo apt purge -y steam-launcher
+
+sudo rm -rf /usr/bin/steam ~/.steam ~/.local/share/Steam /usr/lib/steam /usr/share/applications/steam.desktop /usr/share/doc/steam ~/Desktop/steam.desktop
+exit 0

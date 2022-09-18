@@ -1,0 +1,4 @@
+#!/bin/bash
+
+purge_packages || error "Dependencies failed to uninstall"
+sudo rm -rf ~/RPIDoom3Installer ~/Doom3GameFiles ~/Doom3Demo ~/Desktop/Doom3Demo.desktop ~/.local/share/applications/Doom3Demo.desktop ~/.local/share/applications/Doom3.desktop

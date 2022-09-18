@@ -1,0 +1,5 @@
+Design printed circuit boards.
+This is Eagle CAD's last 32-bit Linux release (7.7.0), emulated using Box86. Subsequent Eagle releases dropped 32-bit support.
+
+To run: Menu -> Programming -> Eagle
+To run in a terminal: eagle

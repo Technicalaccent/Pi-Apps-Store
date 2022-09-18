@@ -1,0 +1,5 @@
+#!/bin/bash
+purge_packages || exit 1
+
+rm -rf ${HOME}/Pi-Power-Tools ${HOME}/Pi-Power-Tools.old || error "failed on rm step 1!"
+rm -f ${HOME}/Desktop/ppt.desktop ${HOME}/.local/share/applications/ppt.desktop  || error "failed on rm step 2!"

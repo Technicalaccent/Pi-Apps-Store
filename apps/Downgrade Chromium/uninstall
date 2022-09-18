@@ -1,0 +1,49 @@
+#!/bin/bash
+if [ ! -z "$(ps aux | grep chromium | grep -v 'grep' )" ];then
+  echo -n "Please close all Chromium windows first."
+  yad --info --center --window-icon="$(dirname "$0")/icon-64.png" \
+  --title="Close Chromium first" --text="$(echo -e "Chromium is running.\nTo reduce the risk of Chromium profile corruption, please close Chromium first.")" \
+  --window-icon="$(dirname "$0")/icon-64.png" --no-buttons &
+  yadpid=$!
+  while [ ! -z "$(ps aux | grep chromium | grep -v 'grep' )" ];do
+    echo -n '.'
+    sleep 1
+  done
+  echo
+  kill $yadpid
+fi
+
+if [ -d ~/.config/chromium.bak ];then
+  while true;do
+    read -p "Would you like to restore the backup of Chromium's config folder? [y/n] " answer
+    
+    if [ "$answer" == y ] || [ "$answer" == Y ];then
+      echo "Restoring backup..."
+      
+      #first remove existing
+      if [ -e ~/.config/chromium ];then
+        gio trash ~/.config/chromium || rm -rf ~/.config/chromium
+      fi
+      
+      #then rename the backup folder
+      mv ~/.config/chromium.bak ~/.config/chromium
+      break #exit loop
+      
+    elif [ "$answer" == n ] || [ "$answer" == N ];then
+      break #exit loop
+    else
+      echo "Unknown answer "\""$answer"\"""
+    fi
+  done
+fi
+
+sudo rm -f /etc/chromium-browser/customizations/01-disable-seccomp
+
+status "Allowing Chromium to be upgradable..."
+echo "chromium-browser install" | sudo dpkg --set-selections
+echo "chromium-browser-l10n install" | sudo dpkg --set-selections
+echo "chromium-codecs-ffmpeg-extra install" | sudo dpkg --set-selections
+
+status "Upgrading Chromium..."
+"${DIRECTORY}/api" apt_lock_wait
+sudo apt install -y --only-upgrade --allow-downgrades --allow-change-held-packages chromium-browser chromium-browser-l10n chromium-codecs-ffmpeg-extra

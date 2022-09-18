@@ -1,0 +1,29 @@
+#!/bin/bash
+
+filepath_32="https://packagecloud.io/ookla/speedtest-cli/ubuntu/pool/bionic/main/s/speedtest/speedtest_1.2.0.84-1.ea6b6773cf_armhf.deb"
+filepath_64="https://packagecloud.io/ookla/speedtest-cli/ubuntu/pool/bionic/main/s/speedtest/speedtest_1.2.0.84-1.ea6b6773cf_arm64.deb"
+
+# remove speedtest-cli package if installed from ubuntu/debian repo as it conflicts with the official ookla package
+$(dpkg --status speedtest-cli &> /dev/null)
+if [[ $? -eq 0 ]]; then
+  sudo apt-get --yes --purge remove speedtest-cli || error "Could not remove non-official speedtest-cli package"
+fi
+
+case "$arch" in
+    "64") install_packages "${filepath_64}" || exit 1 ;;
+    "32") install_packages "${filepath_32}" || exit 1 ;;
+    *) error "arch variable is not set, can not continue" ;;
+esac
+
+printf "Creating shortcut..."
+cat << EOF | sudo tee /usr/share/applications/speedtest.desktop
+[Desktop Entry]
+Type=Application
+Name=Run Speedtest
+Comment=CLI internet speed test
+Exec=bash -c 'speedtest;read -p "Press any key to exit"'
+Icon=$HOME/pi-apps/apps/SpeedTest-CLI/icon-64.png
+Categories=Network;WebBrowser;
+Terminal=true
+StartupNotify=false
+EOF

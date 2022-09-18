@@ -1,0 +1,6 @@
+#!/bin/bash
+
+purge_packages || exit 1
+rm -f ~/.local/share/applications/ppsspp.desktop || error "Failed to remove desktop entry!"
+
+rm -rf ~/ppsspp || error "Failed to remove install directory!"

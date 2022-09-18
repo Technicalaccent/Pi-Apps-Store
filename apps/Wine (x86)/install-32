@@ -1,0 +1,534 @@
+#!/bin/bash
+if grep -q ARMv7 /proc/cpuinfo ;then
+  hardware='pi3'
+elif grep -q ARMv6 /proc/cpuinfo ;then
+  hardware='pi0'
+  error "Wine is not compatible with the Raspberry Pi Zero or other ARMv6 boards."
+else
+  hardware='pi4'
+fi
+
+if [ ! -e /proc/config.gz ];then
+  sudo modprobe configs || exit 1
+  if [ ! -e /proc/config.gz ];then
+    error "/proc/config.gz does not exist after running sudo modprobe configs!"
+  fi
+fi
+
+vmsplit_output="$(gunzip < /proc/config.gz | grep VMSPLIT)"
+if [ -z "$vmsplit_output" ];then
+  kernel="$(uname -m)"
+  if [ $kernel == aarch64 ];then
+    echo "No memory split information due to running a 64-bit kernel. Continuing..."
+  else
+    echo "No memory split information and not running a 64-bit kernel. Strange."
+    sleep 2
+    echo "Continuing..."
+  fi
+elif echo "$vmsplit_output" | grep -q "^CONFIG_VMSPLIT_2G=y" || echo "$vmsplit_output" | grep -q "^# CONFIG_VMSPLIT_3G is not set" ;then
+  
+  #ensure hardware is armv7 for kernel compiling to work
+  if [ "$hardware" != 'pi3' ];then
+    error "User error: This script is not capable of handling your $hardware board with a 2G/2G memory split.\nWhatever you did to get yourself into this situation, undo it and try installing Wine again."
+  #ensure /boot/config.txt exists to make sure this is a rpi board
+  elif [ ! -f /boot/config.txt ];then
+    error "User error: Your system is not currently compatible with Wine. It needs a kernel with 3G/1G memory split. This is easy to do: switch to the 64-bit kernel by adding a line to /boot/config.txt. However, that file does not exist. Most likely you are trying to use Pi-Apps on an unsupported device or operating system."
+  fi
+  
+  #continue asking until valid answer
+  while true;do
+    echo -e "You are using a kernel with a 2G/2G memory split.\nWine will not work on such systems. What would you like to do?
+1. Switch to the 64-bit kernel (about 2 minutes)
+2. Compile a 3G/1G kernel (several hours)
+3. Install a precompiled 3G/1G kernel (about 2 minutes but might be outdated)
+4. Exit"
+    read -n1 answer
+    echo ''
+    if [ "$answer" == 1 ];then
+      #switch to 64bit kernel
+      
+      echo "arm_64bit=1" | sudo tee --append /boot/config.txt >/dev/null
+      echo -e "The 64-bit kernel has been enabled by adding 'arm_64bit=1' to /boot/config.txt\nPlease reboot and install the Wine app again."
+      sleep infinity
+    elif [ "$answer" == 2 ];then
+      #compile 3g/1g kernel
+      
+      #backup ~/linux if it exists
+      rm -rf ~/linux.bak
+      [ -e ~/linux ] && (echo "$HOME/linux already exists, moving it to $HOME/linux.bak" ; mv -f ~/linux ~/linux.bak)
+      
+      #download kernel source code
+      git_clone --depth=1 https://github.com/raspberrypi/linux || error "Failed to git_clone the raspberry pi kernel repo!"
+      
+      echo "Installing necessary build packages..."
+      install_packages raspberrypi-kernel-headers build-essential bc git wget bison flex libssl-dev make libncurses-dev || exit 1
+      
+      #build for pi3
+      cd ~/linux || error "Failed to enter the ~/linux folder!"
+      KERNEL=kernel7
+      make -j8 bcm2709_defconfig || error "The make command exited with failure. Full command: 'make -j8 bcm2709_defconfig'"
+      
+      #change memory split config
+      echo "Setting memory split to 3G/1G"
+      sed -i 's/CONFIG_VMSPLIT_2G=y/# CONFIG_VMSPLIT_2G is not set/g' ~/linux/.config || error "sed failed to edit $HOME/linux/.config file!"
+      sed -i 's/# CONFIG_VMSPLIT_3G is not set/CONFIG_VMSPLIT_3G=1/g' ~/linux/.config
+      
+      echo '' | make -j8 zImage modules dtbs || error "Failed to make bcm2709_defconfig zImage modules dtbs!"
+      
+      #install
+      echo "Copying new files to /boot/..."
+      sudo make modules_install || error "sudo make modules_install failed!"
+      sudo cp arch/arm/boot/dts/*.dtb /boot/ || error "Failed to copy dtb files to /boot!"
+      sudo cp arch/arm/boot/dts/overlays/*.dtb* /boot/overlays/ || error "Failed to copy overlays to /boot/overlays!"
+      sudo cp arch/arm/boot/dts/overlays/README /boot/overlays/
+      sudo cp arch/arm/boot/zImage /boot/$KERNEL.img || error "Failed to copy kernel to /boot/$KERNEL.img!"
+      cd
+      rm -rf ~/linux
+      
+      echo "Removing the utilities that were used to compile the kernel..."
+      purge_packages
+      
+      #message
+      echo -e "It appears the 3G/1G kernel has been built and installed successfully.\nPlease reboot and install the Wine app again."
+      sleep infinity
+    elif [ "$answer" == 3 ];then 
+      #install precompiled 3g/1g kernel
+      
+      #backup ~/linux if it exists
+      rm -rf ~/linux.bak
+      [ -e ~/linux ] && (echo "$HOME/linux already exists, moving it to $HOME/linux.bak" ; mv -f ~/linux ~/linux.bak)
+      #download precompiled kernel
+      cd $HOME
+      echo "Downloading precompiled kernel..."
+      wget https://github.com/Itai-Nelken/RPi-3g-1g-kernel-wine/releases/download/5/rpi23_3g1g_kernel.zip -O ~/3g1g-rpi-kernel.zip || error "Failed to download prebuilt kernel!"
+      #extract precompiled kernel
+      echo "Extracting prebuilt kernel..."
+      sleep 0.5 # so user has time to read what is happening
+      unzip ~/3g1g-rpi-kernel.zip || error "Failed to extract kernel!"
+      cd linux || error "Failed to change folder to ~/linux!"
+      #install the precompiled kernel
+      export KERNEL=kernel7
+      sudo make modules_install || error "sudo make modules_install failed!"
+      sudo cp arch/arm/boot/dts/*.dtb /boot/ || error "Failed to copy dtb files to /boot!"
+      sudo cp arch/arm/boot/dts/overlays/*.dtb* /boot/overlays/ || error "Failed to copy overlays to /boot/overlays!"
+      sudo cp arch/arm/boot/dts/overlays/README /boot/overlays/
+      sudo cp arch/arm/boot/zImage /boot/$KERNEL.img || error "Failed to copy kernel to /boot/$KERNEL.img!"
+      cd
+      rm -rf linux ~/3g1g-rpi-kernel.zip
+      #message
+      echo -e "\e[1mIt appears the precompiled 3G/1G kernel has been installed successfully.\nPlease reboot and install the Wine app again.\e[0m"
+      sleep infinity
+    elif [ "$answer" == 4 ];then
+      echo "User error: exited."
+      exit 1
+    else
+      echo "Invalid response. Must be '1', '2', '3' or '4'."
+    fi
+  done
+else
+  echo "Your system is using a 3G/1G kernel. Continuing..."
+fi
+#Past this point, the pi is running a Wine-compatible kernel.
+
+#install box86
+"${DIRECTORY}/manage" install-if-not-installed Box86 || error "Box86 failed to install somehow!"
+if ! command -v box86 >/dev/null ;then
+  error "User error: Pi-Apps thinks Box86 is installed, however no command named 'box86' exists. Please install Box86 manually."
+fi
+echo "Installed Box86 version:"
+box86 -v || error "User error: Something went wrong when trying to run Box86."
+
+# Remove old wine, while leaving config intact
+pkill -9 wine
+command -v wineserver >/dev/null && wineserver -k
+command -v wine >/dev/null && sudo apt purge -y wine &>/dev/null &
+sudo rm -rf /usr/local/bin/wine /usr/local/bin/wineboot /usr/local/bin/wineserver /usr/local/bin/winecfg /usr/local/bin/winetricks ~/wine.tgz /opt/wine ~/.cache/winetricks ~/.cache/wine 2>/dev/null
+
+# Get dependencies
+install_packages cabextract p7zip-full || exit 1
+# Download wine to /opt
+wget https://github.com/phoenixbyrd/TwisterOS/raw/master/wine.tgz -O /tmp/wine.tgz || error 'Failed to download wine!'
+sudo tar zxf /tmp/wine.tgz -C /opt --no-same-owner || error 'Failed to extract wine!' #use the --no-same-owner flag, because we want the folder's owner to be root, not hardcoded as pi.
+rm -f /tmp/wine.tgz
+[ ! -f /opt/wine/bin/wine ] && error "The wine.tgz extraction succeeded, but the file '/opt/wine/bin/wine' is missing!"
+
+#edit wine.inf to disable mime-associations. Nobody wants to double-click a text file, wonder why nothing is happening, then watch 15 Wine notepad windows pop up. Ask me how I know.
+sudo sed -i 's/winemenubuilder.exe -a -r/winemenubuilder.exe -r/' /opt/wine/share/wine/wine.inf #See: https://askubuntu.com/a/400430
+
+#download winetricks
+wget -O /tmp/winetricks "https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks" || exit 1
+sudo mv /tmp/winetricks /opt/wine/bin/winetricks || error "Failed to move winetricks script to /opt/wine/bin folder!"
+sudo chmod +x /opt/wine/bin/winetricks
+
+#download Mono to universal location (to be installed automatically in all wine prefixes)
+#according to https://wiki.winehq.org/Mono#Versions, use Mono 5.1.0 for Wine 5.13
+sudo mkdir -p /opt/wine/mono
+wget -O "/tmp/wine-mono-5.1.0-x86.msi" 'https://dl.winehq.org/wine/wine-mono/5.1.0/wine-mono-5.1.0-x86.msi' || exit 1
+sudo mv "/tmp/wine-mono-5.1.0-x86.msi" "/opt/wine/mono/wine-mono-5.1.0-x86.msi" || exit 1
+
+#download Gecko to universal location (to be installed automatically in all wine prefixes)
+#according to https://wiki.winehq.org/Gecko, use Gecko 2.47.1 for Wine 5.13
+sudo mkdir -p /opt/wine/gecko
+wget -O "/tmp/wine-gecko-2.47.1-x86.msi" 'https://dl.winehq.org/wine/wine-gecko/2.47.1/wine-gecko-2.47.1-x86.msi' || exit 1
+sudo mv "/tmp/wine-gecko-2.47.1-x86.msi" "/opt/wine/gecko/wine-gecko-2.47.1-x86.msi" || exit 1
+
+status "Creating terminal commands:"
+echo "  - winecfg"
+sudo ln -s /opt/wine/bin/winecfg /usr/local/bin/winecfg
+echo "  - wineserver"
+sudo ln -s /opt/wine/bin/wineserver /usr/local/bin/wineserver
+echo "  - wineboot"
+sudo ln -s /opt/wine/bin/wineboot /usr/local/bin/wineboot
+
+echo "  - wine"
+echo "#!/bin/bash
+if [ -d /opt/wine/mesa ];then
+  export LD_LIBRARY_PATH=/opt/wine/mesa/lib/arm-linux-gnueabihf/
+  export LIBGL_DRIVERS_PATH=/opt/wine/mesa/lib/arm-linux-gnueabihf/dri/
+  export VK_ICD_FILENAMES=/opt/wine/mesa/share/vulkan/icd.d/broadcom_icd.armv7l.json
+fi
+/opt/wine/bin/wine"' "$@"' | sudo tee /usr/local/bin/wine >/dev/null
+
+echo "  - winetricks"
+echo "#!/bin/bash
+BOX86_NOBANNER=1 /opt/wine/bin/winetricks"' "$@"' | sudo tee /usr/local/bin/winetricks >/dev/null
+
+#make them all executable
+status -n "Making executable... "
+sudo chmod +x /usr/local/bin/winecfg /usr/local/bin/wineserver /usr/local/bin/wineboot /usr/local/bin/wine /usr/local/bin/winetricks || error "\nFailed to mark all commands as executable. Most likely one failed to be generated or copied. These files are:\n/usr/local/bin/winecfg\n/usr/local/bin/wineserver\n/usr/local/bin/wineboot\n/usr/local/bin/wine\n/usr/local/bin/winetricks"
+status_green "Done"
+echo
+
+#get mesa and icons from wine-stuff repo
+cd /tmp
+rm -rf "$PWD/wine-stuff"
+git clone https://github.com/Botspot/wine-stuff || error "Failed to clone wine-stuff repository!"
+sudo mv "$PWD/wine-stuff/icons" /opt/wine
+sudo mv "$PWD/wine-stuff/Windows_10.msstyles" /opt/wine
+if [ $(ldd --version | head -n1 | awk '{print $NF}' | sed 's/\..*//g') -ge 2 ] && [ "$(ldd --version | head -n1 | awk '{print $NF}' | sed 's/.*\.//g')" -ge 30 ];then
+  #only install mesa if glibc is 2.30 or greater
+  sudo mv "$PWD/wine-stuff/mesa" /opt/wine
+fi
+rm -rf "$PWD/wine-stuff"
+cd
+
+#create menu launchers
+status -n "Creating Menu launchers... "
+#remove old local menu launchers
+rm -f ~/.local/share/applications/wine-config.desktop ~/.local/share/applications/wine-tricks.desktop ~/.local/share/applications/wine-explorer.desktop ~/.local/share/applications/wine-uninstaller.desktop ~/.local/share/applications/wine-taskmgr.desktop ~/.local/share/applications/wine-killer.desktop ~/.local/share/applications/wine-regenerate.desktop
+
+#Remove wine auto-generated desktop files that handle mimetypes. Nobody in their right mind would want this.
+#See: https://askubuntu.com/a/400430
+rm -f ~/.local/share/mime/packages/x-wine*
+rm -f ~/.local/share/applications/wine-extension*
+rm -f ~/.local/share/icons/hicolor/*/*/application-x-wine-extension*
+rm -f ~/.local/share/mime/application/x-wine-extension*
+
+echo "[Desktop Entry]
+StartupNotify=true
+Terminal=false
+Type=Application
+Name=Wine Configuration
+Exec=wine winecfg
+Icon=/opt/wine/icons/winecfg.png
+Categories=System;
+Comment=Configure wine" | sudo tee /usr/share/applications/wine-config.desktop
+
+echo "[Desktop Entry]
+Name=Winetricks
+Comment=Work around problems and install applications under Wine
+Exec=bash -c 'BOX86_NOBANNER=1 box86 winetricks --gui'
+Terminal=false
+Icon=/opt/wine/icons/winetricks.png
+Type=Application
+Categories=System;" | sudo tee /usr/share/applications/wine-tricks.desktop
+
+echo "[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Wine Desktop
+Comment=Wine graphical desktop environment to mimic a Windows OS
+Icon=/opt/wine/icons/wine-desktop.png
+Exec=wine explorer /desktop=shell,1280x720
+Terminal=false
+Categories=System;" | sudo tee /usr/share/applications/wine-explorer.desktop
+
+echo "[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Wine Program Manager
+Comment=Install/Remove Windows programs
+Icon=/opt/wine/icons/wine-program-manager.png
+Exec=wine uninstaller
+Terminal=false
+Categories=System;" | sudo tee /usr/share/applications/wine-uninstaller.desktop
+
+echo "[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Wine Task Manager
+Comment=View running processes within Wine
+Icon=/opt/wine/icons/winetask.png
+Exec=wine taskmgr
+Terminal=false
+Categories=System;" | sudo tee /usr/share/applications/wine-taskmgr.desktop
+
+echo "[Desktop Entry]
+StartupNotify=false
+Version=1.0
+Type=Application
+Name=Wine Killer
+Comment=Terminate any running Wine processes
+Icon=/opt/wine/icons/winestop.png
+Exec=wineserver -k
+Terminal=false
+Categories=System;" | sudo tee /usr/share/applications/wine-killer.desktop
+
+echo "[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Wine Reset
+Comment=Clean out the default Wine prefix and start over
+Icon=/opt/wine/icons/wine-regenerate.png
+Exec=bash -c "\""yad --window-icon=/opt/wine/icons/wine-regenerate.png --title='Wine Reset' --text='Are you sure you want to DELETE all data and applications in your Wine prefix and start over?' --center --button=Cancel:1 --button=Yes:0 --on-top && ${DIRECTORY}/etc/terminal-run 'echo y | winetricks annihilate -q ; generate-wine-prefix' 'Generating Wine prefix...'"\""
+Terminal=false
+Categories=System;" | sudo tee /usr/share/applications/wine-regenerate.desktop
+status_green "Done"
+
+cat << EOF | sudo tee /usr/local/bin/generate-wine-prefix >/dev/null
+echo
+
+#set up functions
+$(declare -f error)
+$(declare -f status)
+
+if [ "\$(id -u)" == 0 ];then
+  error "Please don't run this script with sudo."
+fi
+
+if [ -z "\$WINEPREFIX" ];then
+  WINEPREFIX="\$HOME/.wine"
+fi
+export WINEPREFIX
+
+if [ -e "\$HOME/.wine" ];then
+  status "Checking Wine prefix at \$WINEPREFIX..."
+else
+  status "Generating Wine prefix at \$WINEPREFIX..."
+fi
+echo "To choose another prefix, set the WINEPREFIX variable."
+echo "Waiting 5 seconds..."
+sleep 5
+
+# Boot wine (make fresh wineprefix)
+export BOX86_NOBANNER=1 #hide box86 output (for cosmetics)
+export WINEARCH=win32 #Make sure Wine creates a 32-bit prefix
+#export WINEDLLOVERRIDES="mscoree,mshtml=" #Avoid asking user to install gecko or mono
+
+wine wineboot #this won't display any dialog boxes that require a button to be clicked
+#wait until above process exits
+sleep 2
+while [ ! -z "\$(pgrep -i 'wine C:')" ];do
+  sleep 1
+done
+
+status "Making registry changes..."
+TMPFILE="\$(mktemp)" || exit 1
+echo 'REGEDIT4' > \$TMPFILE
+
+#enable font smoothing - see https://askubuntu.com/a/219795
+echo "  - Font smoothing"
+
+MODE=2 # 0 = disabled; 2 = enabled
+TYPE=2 # 1 = regular;  2 = subpixel
+ORIENTATION=1 # 0 = BGR; 1 = RGB
+
+echo '
+[HKEY_CURRENT_USER\Control Panel\Desktop]
+"FontSmoothing"="'\$MODE'"
+"FontSmoothingOrientation"=dword:0000000'\$ORIENTATION'
+"FontSmoothingType"=dword:0000000'\$TYPE'
+"FontSmoothingGamma"=dword:00000578' >> \$TMPFILE
+
+echo "  - Windows 10 appearance theme"
+mkdir -p "\$WINEPREFIX/drive_c/windows/Resources/Themes/Windows_10"
+cp -f /opt/wine/Windows_10.msstyles "\$WINEPREFIX/drive_c/windows/Resources/Themes/Windows_10"
+
+echo '
+[HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\ThemeManager]
+"ColorName"="NormalColor"
+"DllName"="C:\\\\windows\\\\Resources\\\\Themes\\\\Windows_10\\\\Windows_10.msstyles"
+"FlatMenu"=dword:00000000
+"GradientCaption"=dword:00000001
+"IconTitleFont"=hex:f5,ff,ff,ff,00,00,00,00,00,00,00,00,00,00,00,00,90,01,00,\
+  00,00,00,00,00,00,00,00,22,54,00,61,00,68,00,6f,00,6d,00,61,00,00,00,00,00,\
+  00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
+  00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00
+"NonClientMetrics"=hex:f8,01,00,00,01,00,00,00,10,00,00,00,10,00,00,00,12,00,\
+  00,00,12,00,00,00,f5,ff,ff,ff,00,00,00,00,00,00,00,00,00,00,00,00,bc,02,00,\
+  00,00,00,00,00,00,00,00,22,54,00,61,00,68,00,6f,00,6d,00,61,00,00,00,00,00,\
+  00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
+  00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,0f,00,\
+  00,00,0f,00,00,00,fa,ff,ff,ff,00,00,00,00,00,00,00,00,00,00,00,00,90,01,00,\
+  00,00,00,00,00,00,00,00,22,54,00,61,00,68,00,6f,00,6d,00,61,00,00,00,00,00,\
+  00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
+  00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,12,00,\
+  00,00,12,00,00,00,f5,ff,ff,ff,00,00,00,00,00,00,00,00,00,00,00,00,90,01,00,\
+  00,00,00,00,00,00,00,00,22,54,00,61,00,68,00,6f,00,6d,00,61,00,00,00,00,00,\
+  00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
+  00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,f5,ff,\
+  ff,ff,00,00,00,00,00,00,00,00,00,00,00,00,90,01,00,00,00,00,00,00,00,00,00,\
+  22,54,00,61,00,68,00,6f,00,6d,00,61,00,00,00,00,00,00,00,00,00,00,00,00,00,\
+  00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
+  00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,f5,ff,ff,ff,00,00,00,00,00,00,\
+  00,00,00,00,00,00,90,01,00,00,00,00,00,00,00,00,00,22,54,00,61,00,68,00,6f,\
+  00,6d,00,61,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
+  00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
+  00,00,00,00,00,00,00,00,00,00,00
+"SizeName"="NormalSize"
+"ThemeActive"="1"
+
+[HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\ThemeManager\Control Panel\Colors]
+"ActiveBorder"="212 208 200"
+"ActiveTitle"="10 36 106"
+"AppWorkSpace"="128 128 128"
+"Background"="58 110 165"
+"ButtonAlternateFace"="181 181 181"
+"ButtonDkShadow"="64 64 64"
+"ButtonFace"="212 208 200"
+"ButtonHilight"="255 255 255"
+"ButtonLight"="212 208 200"
+"ButtonShadow"="128 128 128"
+"ButtonText"="0 0 0"
+"GradientActiveTitle"="166 202 240"
+"GradientInactiveTitle"="192 192 192"
+"GrayText"="128 128 128"
+"Hilight"="10 36 106"
+"HilightText"="255 255 255"
+"HotTrackingColor"="0 0 200"
+"InactiveBorder"="212 208 200"
+"InactiveTitle"="128 128 128"
+"InactiveTitleText"="212 208 200"
+"InfoText"="0 0 0"
+"InfoWindow"="255 255 225"
+"Menu"="212 208 200"
+"MenuBar"="212 208 200"
+"MenuHilight"="10 36 106"
+"MenuText"="0 0 0"
+"Scrollbar"="212 208 200"
+"TitleText"="255 255 255"
+"Window"="255 255 255"
+"WindowFrame"="0 0 0"
+"WindowText"="0 0 0"
+
+[HKEY_CURRENT_USER\Control Panel\Colors]
+"ActiveBorder"="212 208 200"
+"ActiveTitle"="115 188 238"
+"AppWorkSpace"="128 128 128"
+"Background"="0 0 0"
+"ButtonAlternateFace"="181 181 181"
+"ButtonDkShadow"="106 106 106"
+"ButtonFace"="240 240 240"
+"ButtonHilight"="255 255 255"
+"ButtonLight"="227 227 227"
+"ButtonShadow"="165 165 165"
+"ButtonText"="0 0 0"
+"GradientActiveTitle"="115 188 238"
+"GradientInactiveTitle"="158 214 250"
+"GrayText"="165 165 165"
+"Hilight"="231 239 245"
+"HilightText"="0 0 0"
+"HotTrackingColor"="59 152 211"
+"InactiveBorder"="212 208 200"
+"InactiveTitle"="158 214 250"
+"InactiveTitleText"="150 150 150"
+"InfoText"="0 0 0"
+"InfoWindow"="255 255 225"
+"Menu"="255 255 255"
+"MenuBar"="240 240 240"
+"MenuHilight"="230 230 230"
+"MenuText"="0 0 0"
+"Scrollbar"="212 208 200"
+"TitleText"="28 28 28"
+"Window"="255 255 255"
+"WindowFrame"="0 0 0"
+"WindowText"="0 0 0"
+
+[HKEY_CURRENT_USER\Control Panel\Desktop\WindowMetrics]
+"BorderWidth"="1"
+"CaptionFont"=hex:08,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,bc,02,00,00,\
+  00,00,00,00,00,00,00,22,54,00,61,00,68,00,6f,00,6d,00,61,00,00,00,00,00,00,\
+  00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
+  00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00
+"IconFont"=hex:09,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,90,01,00,00,00,\
+  00,00,01,00,00,00,00,53,00,65,00,67,00,6f,00,65,00,20,00,55,00,49,00,20,00,\
+  53,00,65,00,6d,00,69,00,62,00,6f,00,6c,00,64,00,00,00,00,00,00,00,00,00,00,\
+  00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00
+"MenuFont"=hex:08,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,90,01,00,00,00,\
+  00,00,00,00,00,00,22,54,00,61,00,68,00,6f,00,6d,00,61,00,00,00,00,00,00,00,\
+  00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
+  00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00
+"MessageFont"=hex:08,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,90,01,00,00,\
+  00,00,00,00,00,00,00,22,54,00,61,00,68,00,6f,00,6d,00,61,00,00,00,00,00,00,\
+  00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
+  00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00
+"ScrollHeight"="-255"
+"ScrollWidth"="-255"
+"SmCaptionFont"=hex:05,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,90,01,00,\
+  00,00,00,00,01,00,00,00,00,53,00,65,00,67,00,6f,00,65,00,20,00,55,00,49,00,\
+  20,00,53,00,65,00,6d,00,69,00,62,00,6f,00,6c,00,64,00,00,00,00,00,00,00,00,\
+  00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00
+"SmCaptionHeight"="-300"
+"SmCaptionWidth"="-300"
+"StatusFont"=hex:08,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,90,01,00,00,\
+  00,00,00,00,00,00,00,22,54,00,61,00,68,00,6f,00,6d,00,61,00,00,00,00,00,00,\
+  00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
+  00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00' >> \$TMPFILE
+
+echo "  - Setting DPI to 120"
+echo '
+[HKEY_LOCAL_MACHINE\System\CurrentControlSet\Hardware Profiles\Current\Software\Fonts]
+"LogPixels"=dword:00000078
+
+[HKEY_CURRENT_USER\Software\Wine\Fonts]
+"LogPixels"=dword:00000078
+
+[HKEY_CURRENT_USER\Control Panel\Desktop]
+"LogPixels"=dword:00000078' >> \$TMPFILE
+
+echo "  - Disabling Wine mime associations" #see https://askubuntu.com/a/400430
+
+echo '
+[HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\RunServices]
+"winemenubuilder"="C:\\\\windows\\\\system32\\\\winemenubuilder.exe -r"
+
+[HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\RunServices]
+"winemenubuilder"="C:\\\\windows\\\\system32\\\\winemenubuilder.exe -r"' >> \$TMPFILE
+
+wine regedit \$TMPFILE
+
+rm -f \$TMPFILE
+
+#install some packages with winetricks for a better out-of-the-box experience
+export W_OPT_UNATTENDED=1 #Avoid opening any dialog windows; install everything in unattended mode
+for i in winxp mfc42 vcrun6 vcrun2003 xact d3drm d3dx9_43 d3dcompiler_43 d3dx9 fontfix corefonts gdiplus dotnet20 msxml3 vcrun2005sp1 vcrun2008 ;do
+  echo
+  status "Installing \$i with winetricks..."
+  winetricks \$i
+done
+status "Winetricks finished"
+
+#update the wine prefix (~/.wine) to fix the issue that causes wine to not know its system drive
+wine wineboot -u
+#wait until above process exits
+sleep 2
+while [ ! -z "\$(pgrep -i 'wine C:')" ];do
+  sleep 1
+done
+EOF
+
+sudo chmod +x /usr/local/bin/generate-wine-prefix
+/usr/local/bin/generate-wine-prefix
+
+exit 0
+

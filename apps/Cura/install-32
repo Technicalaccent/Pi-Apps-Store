@@ -1,0 +1,44 @@
+#!/bin/bash
+
+version=4.20.4
+version2=0.5.0
+wget -O /tmp/Cura.AppImage https://github.com/smartavionics/Cura/releases/download/${version}/Cura-${version}-mb-armhf.AppImage || error "Failed to download!"
+sudo mv /tmp/Cura.AppImage /opt
+sudo chmod +x /opt/Cura.AppImage
+
+#ensure libfuse2 is installed to avoid "error loading libfuse.so.2" error
+install_packages libfuse2 libgles-dev || exit 1
+
+#get stl-thumb package - non-fatal as it's not crucial to Cura's function
+(install_packages "https://github.com/unlimitedbacon/stl-thumb/releases/download/v${version2}/stl-thumb_${version2}_armhf.deb") || warning "Failed to install stl-thumb package, but continuing as it's not crucial to Cura's operation."
+
+if [ -z "$(cat ~/.config/mimeapps.list | grep -F 'cura.desktop')" ];then
+  echo "Associating the STL mimetype for Cura..."
+  echo "[Added Associations]
+model/stl=cura.desktop;" >> ~/.config/mimeapps.list
+fi
+
+#New smartavionics Cura builds are based on Cura 4, which now uses a different config folder.
+#Copy the configuration to new directory to avoid losing preferences.
+if [ -d ~/.local/share/cura/master ] && [ ! -d ~/.local/share/cura/4.20 ];then
+  cp -a ~/.local/share/cura/master ~/.local/share/cura/4.20
+fi
+if [ -d ~/.config/cura/master ] && [ ! -d ~/.config/cura/4.20 ];then
+  cp -a ~/.config/cura/master ~/.config/cura/4.20
+fi
+
+enable_module fuse || exit 1
+
+echo "[Desktop Entry]
+Name=Ultimaker Cura
+GenericName=3D Printing Software
+Comment=Cura converts 3D models into paths for a 3D printer. It prepares your print for maximum accuracy, minimum printing time and good reliability with many extra features that make your print come out great.
+Exec=/opt/Cura.AppImage %f
+Icon=$(dirname $0)/icon-64.png
+Terminal=false
+Type=Application
+MimeType=application/sla;application/vnd.ms-3mfdocument;application/prs.wavefront-obj;model/x3d+xml;model/stl;
+Categories=Graphics;Education;Development;Science;
+Keywords=3D;Printing;
+StartupNotify=true" | sudo tee /usr/share/applications/cura.desktop >/dev/null || error "Failed to create menu button!"
+

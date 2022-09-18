@@ -1,0 +1,16 @@
+#!/bin/bash
+
+version=4.1.0_1
+
+#get version of glibc
+glibc_ver="$(ldd --version | head -n1 | awk '{print $NF}')" # example value: 2.30
+maj="$(awk -F. '{print $1}' <<<"$glibc_ver")"
+min="$(awk -F. '{print $2}' <<<"$glibc_ver")"
+
+#only use bullseye deb if glibc is 2.30 or greater
+if [ $maj -eq 2 ] && [ $min -ge 30 ] || [ $maj -gt 2 ];then
+  install_packages https://sonic-pi.net/files/releases/v${version%_*}/sonic-pi_${version}_bullseye.armhf.deb libconfig9 || exit 1
+else
+  #otherwise, use buster deb
+  install_packages https://sonic-pi.net/files/releases/v3.3.1/sonic-pi_3.3.1_1_armhf.deb libconfig9 || exit 1
+fi

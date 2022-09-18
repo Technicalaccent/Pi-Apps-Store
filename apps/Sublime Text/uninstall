@@ -1,0 +1,6 @@
+#!/bin/bash
+
+rm -f ~/.local/share/applications/sublime-text.desktop
+rm -rf ~/"Sublime Text 2"
+purge_packages || exit 1
+remove_repofile_if_unused /etc/apt/sources.list.d/sublime-text.list

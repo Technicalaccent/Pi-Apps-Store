@@ -1,0 +1,16 @@
+#!/bin/bash
+
+version=1.6.4
+
+install_packages firefox-esr '|' firefox https://github.com/browsh-org/browsh/releases/download/v${version}/browsh_${version}_linux_arm64.deb || exit 1
+
+echo "[Desktop Entry]
+Version=${version}
+Type=Application
+Name=Browsh
+Comment=The modern text-based terminal browser.
+Icon=$(dirname "$0")/icon-64.png
+Exec=browsh
+Terminal=true
+Categories=Network;" > ~/.local/share/applications/browsh.desktop
+

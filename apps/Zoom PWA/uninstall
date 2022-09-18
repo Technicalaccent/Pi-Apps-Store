@@ -1,0 +1,8 @@
+#!/bin/bash
+echo -n "Removing files... "
+
+rm -f ~/.local/share/applications/*gbmplfifepjenigdepeahbecfkcalfhg*
+rm -rf ./zoom-pwa
+rm -rf ~/.config/Zoom-PWA
+
+echo Done

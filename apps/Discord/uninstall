@@ -1,0 +1,6 @@
+#!/bin/bash
+killall webcord &>/dev/null && echo "Closing Discord before uninstalling..."
+
+purge_packages || exit 1
+
+exit 0

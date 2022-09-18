@@ -1,0 +1,5 @@
+#!/bin/bash
+
+purge_packages || exit 1
+rm -rf ~/update-buddy
+rm -f ~/.config/autostart/update-buddy.desktop

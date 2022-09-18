@@ -1,0 +1,10 @@
+#!/bin/bash
+rm -rf ~/zoom
+rm -f ~/.local/share/applications/zoom.desktop
+purge_packages || exit 1
+
+if [ -d ~/.zoom ] || [ -f ~/.config/zoomus.conf ];then
+  echo "To prevent data loss, Zoom's settings have not been deleted.
+Delete them with this command:
+rm -rf ~/.zoom ~/.config/zoomus.conf"
+fi

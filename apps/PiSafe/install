@@ -1,0 +1,7 @@
+#!/bin/bash
+
+rm -f ~/pisafe
+wget -O ~/pisafe https://raw.githubusercontent.com/RichardMidnight/pi-safe/main/pisafe || error "Failed to download pisafe install script!"
+
+bash pisafe install -y || error "Bash failed to run PiSafe install script!"
+rm -f ~/pisafe

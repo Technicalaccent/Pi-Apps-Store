@@ -1,0 +1,6 @@
+#!/bin/bash
+purge_packages || exit 1
+
+rm -rf astromenace-master/
+
+rm -f ~/.local/share/applications/astromenace.desktop

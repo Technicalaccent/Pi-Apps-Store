@@ -1,0 +1,2 @@
+#!/bin/bash
+rm -f "$HOME/.fonts/NotoColorEmoji.ttf" || sudo rm -f "$HOME/.fonts/NotoColorEmoji.ttf" || error "Failed to remove font file!"

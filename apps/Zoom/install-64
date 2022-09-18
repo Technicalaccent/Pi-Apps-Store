@@ -1,0 +1,71 @@
+#!/bin/bash
+
+version=5.11.10.4400
+
+#install box64
+"${DIRECTORY}/manage" install-if-not-installed 'Box64' || error "Box64 installation failed!"
+if ! command -v box64 >/dev/null;then
+  error "Box64 failed to install somehow!\n/usr/local/bin/box64 does not exist"
+fi
+
+# Get dependencies
+install_packages libxcb-xtest0 libxcb-xfixes0 libturbojpeg0 '|' libturbojpeg pulseaudio-utils pulseaudio || exit 1
+
+#refresh list of libraries
+sudo ldconfig
+
+#For testing, set to false if zoom folder is already there
+if true;then
+  echo "Downloading Zoom..."
+  rm -rf "${HOME}/zoom" ~/zoom_x86_64.tar.xz* ~/zoom_x64_libs.zip* ~/zoom_x64_libs
+  wget "https://zoom.us/client/${version}/zoom_x86_64.tar.xz" || wget 'https://zoom.com/client/latest/zoom_x86_64.tar.xz' || error 'Failed to download Zoom x86_64!'
+  
+  echo "Extracting..."
+  tar -xf ~/zoom_x86_64.tar.xz || error 'Failed to extract Zoom x86_64!'
+  rm -f ~/zoom_x86_64.tar.xz #who cares if this fails
+  
+  echo "Getting x86_64 libs..."
+  wget https://github.com/ryanfortner/rpi-zoom/raw/master/zoom_x64_libs.zip || error "Failed to download zoom x64 libraries!"
+  unzip zoom_x64_libs.zip || error "Failed to extract zoom libraries."
+  mv zoom_x64_libs/* zoom/ || error "Failed to move zoom x64 libraries to zoom folder."
+  rm -r $HOME/zoom_x64_libs || error "Failed to remove library folder."
+fi
+
+echo 'Creating launcher script'
+echo '#!/bin/bash
+trap "echo '\''Zoom exited. Close this terminal to exit'\'' ; sleep infinity" EXIT
+if [ -z "$(ps aux | grep pulseaudio | grep -v grep)" ];then
+  echo -e "\e[102m\e[30mLaunching pulseaudio.\e[0m"
+  pulseaudio &
+  pulsepid=$!
+  trap "kill $pulsepid" EXIT
+  echo "Pulseaudio PID: $pulsepid"
+  sleep 2
+fi
+cd ${HOME}/zoom/
+echo -e "\e[102m\e[30mLaunching Zoom.\e[0m"
+box64 zoom' > "${HOME}/zoom/runzoom.sh"
+chmod +x "${HOME}/zoom/runzoom.sh"
+
+echo "Creating a Zoom button in the Main Menu..."
+echo "[Desktop Entry]
+Name=Zoom
+Exec=${DIRECTORY}/etc/terminal-run "\""$HOME/zoom/runzoom.sh %u"\"" 'Close this window to exit Zoom'
+Icon=$(dirname "$0")/icon-64.png
+Path=${HOME}/zoom/
+Type=Application
+Comment=x86_64 version of software platform used for teleconferencing using Box64
+Categories=Network;
+StartupNotify=true" > ~/.local/share/applications/zoom.desktop
+
+#Associate with mimeapp
+if [ -z "$(cat ~/.config/mimeapps.list | grep 'zoom.desktop')" ];then
+  echo "Associating Zoom mimetypes..."
+  echo "[Added Associations]
+x-scheme-handler/zoomus=zoom.desktop;
+x-scheme-handler/zoommtg=zoom.desktop;" >> ~/.config/mimeapps.list
+fi
+
+systemctl --user unmask pulseaudio.service pulseaudio.socket
+systemctl --user enable pulseaudio.service pulseaudio.socket
+echo "Installation complete!"

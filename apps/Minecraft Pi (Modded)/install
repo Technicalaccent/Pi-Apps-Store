@@ -1,0 +1,48 @@
+#!/bin/bash
+
+# Version
+version=247/artifact/out/minecraft-pi-reborn-client-2.4.3
+
+# Install
+if [ "${arch}" = "64" ]; then
+    url_arch=arm64
+else
+    url_arch=armhf
+fi
+url="https://jenkins.thebrokenrail.com/job/minecraft-pi-reborn/job/master/${version}-${url_arch}.AppImage"
+
+# Cleanup Old Script Versions
+sudo rm -f /etc/apt/trusted.gpg.d/mcpi-revival.gpg
+sudo rm -f /etc/apt/sources.list.d/mcpi-revival.list
+if package_installed gmcpil ;then
+  apt_lock_wait
+  sudo apt-get remove -y gmcpil
+fi
+if package_installed jmcpil ;then
+  apt_lock_wait
+  sudo apt-get remove -y jmcpil
+fi
+if package_installed minecraft-pi-reborn-client ;then
+  apt_lock_wait
+  sudo apt-get remove -y minecraft-pi-reborn-client
+fi
+
+# Download file
+mkdir -p ~/.local/bin || error "Could not make directory"
+wget -O ~/.local/bin/com.thebrokenrail.MCPIRebornClient.AppImage "${url}" || error 'Failed to download AppImage'
+chmod +x ~/.local/bin/com.thebrokenrail.MCPIRebornClient.AppImage
+
+enable_module fuse || exit 1
+
+# Make Desktop file
+mkdir -p ~/.local/share/applications || error "Could not make directory"
+echo "[Desktop Entry]
+Name=Minecraft Pi (Modded)
+Comment=Fun with Blocks
+Icon=$(dirname "$0")/icon-64.png
+StartupNotify=false
+StartupWMClass=com.thebrokenrail.MCPIRebornClient
+Exec=${HOME}/.local/bin/com.thebrokenrail.MCPIRebornClient.AppImage
+Terminal=false
+Type=Application
+Categories=Game;" > ~/.local/share/applications/com.thebrokenrail.MCPIRebornClient.desktop

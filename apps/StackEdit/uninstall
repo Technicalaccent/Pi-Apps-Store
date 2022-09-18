@@ -1,0 +1,6 @@
+#!/bin/bash
+echo "removing ~/stackedit..."
+rm -rf ~/stackedit || error "Failed to remove ~/stackedit!"
+echo "removing menu shortcut..."
+rm -f ~/.local/share/applications/stackedit.desktop || error "Failed to remove menu shortcut!"
+echo "DONE!"

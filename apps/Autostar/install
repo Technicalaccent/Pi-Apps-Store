@@ -1,0 +1,9 @@
+#!/bin/bash
+# Get dependencies
+install_packages yad || exit 1
+rm -rf ~/autostar || error "Failed to first remove autostar folder from $HOME!"
+echo "Downloading autostar..."
+git_clone https://github.com/Botspot/autostar || error "Failed to clone AutoStar repository!"
+
+echo "Running AutoStar setup script..."
+~/autostar/main.sh setup || error "AutoStar setup script failed!"

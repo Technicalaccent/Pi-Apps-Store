@@ -1,0 +1,4 @@
+#!/bin/bash
+
+purge_packages || exit 1
+rm -rf ~/bongocam/ ~/.local/share/applications/bongocam.desktop

@@ -1,0 +1,88 @@
+#!/bin/bash
+
+#runs in the background and refreshes all the list files
+
+#Only one instance of this script should run at a time. If this is removed, preload will form a fairly good fork bomb.
+if [ "$(pgrep preload-daemon | wc -l)" -gt 2 ];then
+  exit 0
+fi
+
+DIRECTORY="$(dirname "$(readlink -f "$(dirname "$0")")")"
+
+function error {
+  echo -e "\e[91m$1\e[39m"
+  exit 1
+}
+
+#for refresh_all_pkgapp_status function, and to prevent preload script from sourcing api
+if ! command -v read_category_files >/dev/null ;then
+  source "${DIRECTORY}/api" || error "failed to source ${DIRECTORY}/api"
+fi
+
+#for mktimestamps function
+source "${DIRECTORY}/preload" "source"
+
+#list of folders to preload, including special folders
+folders="All Apps
+$(read_category_files | awk -F '|' '{print $2}' | sort | uniq | grep .)
+Installed
+Packages"
+#echo "$folders"
+
+IFS=$'\n'
+
+#For systems with older versions of yad, the text color column cannot be left blank. This python script determines the default text color from GTK bindings.
+if [ -z "${text_color+x}" ];then
+  #0400 is the latest version
+  yad_version="$(zcat /usr/share/doc/yad/NEWS.gz | head -n 1 | tr -cd '0123456789\n')"
+  if [ $yad_version -lt 0400 ]; then
+    if command -v python3 &>/dev/null; then
+      python_version="python3"
+    else
+      python_version="python2"
+    fi
+    export text_color=$(echo "import gi
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk
+from gi.repository import Gdk
+win = Gtk.Window()
+vb = Gtk.VBox()
+tv = Gtk.TextView()
+vb.add(tv)
+win.show_all()
+style = tv.get_style_context()
+textcolor = style.get_color(Gtk.StateType.NORMAL)
+print(Gdk.RGBA.to_string(textcolor))
+" | $python_version -)
+  else
+    export text_color=""
+  fi
+fi
+
+#hide package-apps that are unavailable in the repositories, and change their status accordingly
+#only run this if the /var/lib/dpkg/status has been changed since last time
+if [ "$(stat -c %Y /var/lib/dpkg/status 2>/dev/null)" != "$(cat "${DIRECTORY}/data/preload/timestamps-dpkg-status" 2>/dev/null)" ];then
+  echo "Refreshing pkgapp_status..." 1>&2
+  stat -c %Y /var/lib/dpkg/status 2>/dev/null > "${DIRECTORY}/data/preload/timestamps-dpkg-status"
+  refresh_all_pkgapp_status &
+fi
+
+#get modified timestamps for files/directories in the pi-apps folder
+timestamps="$(mktimestamps)"
+
+#determine the app list style (it may change)
+guimode="$(cat "${DIRECTORY}/data/settings/App List Style" 2>/dev/null)"
+
+#only re-preload everything if something in the pi-apps folder was changed
+if [ "$timestamps" != "$(cat "${DIRECTORY}/data/preload/timestamps-preload-daemon" 2>/dev/null)" ];then
+  
+  echo "Preload-daemon running..." 1>&2
+  for folder in $folders ; do
+    "${DIRECTORY}/preload" "$guimode" "$folder" &>/dev/null
+  done
+  echo done 1>&2
+  
+  echo "$timestamps" > "${DIRECTORY}/data/preload/timestamps-preload-daemon"
+else
+  echo "Preload-daemon skipped; nothing was changed" 1>&2
+fi

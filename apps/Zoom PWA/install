@@ -1,0 +1,9 @@
+#!/bin/bash
+echo "Downloading zoom-pwa repository"
+rm -rf ~/zoom-pwa
+git_clone https://github.com/Botspot/zoom-pwa
+
+echo "Running the built-in installation script"
+~/zoom-pwa/install.sh || error "The zoom-pwa/install.sh indicated a failure. Please review errors above this point."
+echo "Cleaning up"
+rm -rf ~/zoom-pwa

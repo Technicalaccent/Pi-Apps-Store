@@ -1,0 +1,4 @@
+#!/bin/bash
+rm -fr ~/.d1x-rebirth
+rm ~/.local/share/applications/d1x-rebirth.desktop
+purge_packages || exit 1

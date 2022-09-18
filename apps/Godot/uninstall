@@ -1,0 +1,6 @@
+#!/bin/bash
+rm -f ~/.local/share/applications/godotengine.desktop
+rm -f ~/.local/share/applications/godot-engine.desktop
+rm -rf ~/Godot
+
+exit 0

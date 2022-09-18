@@ -1,0 +1,4 @@
+#!/bin/bash
+rm -fr ~/.fheroes2
+rm ~/.local/share/applications/fheroes2.desktop
+purge_packages || exit 1

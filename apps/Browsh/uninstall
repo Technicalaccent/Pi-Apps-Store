@@ -1,0 +1,4 @@
+#!/bin/bash
+purge_packages || exit 1
+
+sudo rm -f ~/.local/share/applications/browsh.desktop
