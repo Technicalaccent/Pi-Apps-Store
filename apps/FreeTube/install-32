@@ -1,6 +1,6 @@
 #!/bin/bash
 
-version=0.16.0
+version=0.18.0
 
 install_packages https://apt.raspbian-addons.org/debian/pool/main/f/freetube/freetube_${version}_armhf.deb || exit 1
 
